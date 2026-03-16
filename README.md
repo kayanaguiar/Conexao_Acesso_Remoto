@@ -27,8 +27,8 @@ Baixe o `Acessar Servidores.exe` da [página de Releases](../../releases) e exec
 
 ```bash
 # Clone o repositório
-git clone https://github.com/seu-usuario/AcessarServidores.git
-cd AcessarServidores
+git clone https://github.com/kayanaguiar/Conexao_Acesso_Remoto.git
+cd Conexao_Acesso_Remoto
 
 # Instale a dependência
 pip install cryptography
