@@ -1,0 +1,11 @@
+.claude/
+.serena/
+.secret.key
+.salt
+.verify
+connections.json
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
