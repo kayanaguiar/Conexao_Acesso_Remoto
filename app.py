@@ -154,6 +154,131 @@ class FlatEntry(tk.Frame):
         self._show_placeholder()
 
 
+class ModernScrollbar(tk.Canvas):
+    """Scrollbar moderna estilo overlay — fina, arredondada, com fade."""
+
+    THUMB_COLOR = "#3a3a4a"
+    THUMB_HOVER = C.ACCENT
+    THUMB_WIDTH = 4
+    THUMB_WIDTH_HOVER = 6
+    TRACK_PAD = 2
+    MIN_THUMB = 30
+
+    def __init__(self, parent, command=None, **kw):
+        super().__init__(parent, width=self.THUMB_WIDTH + self.TRACK_PAD * 2,
+                         bg=C.SURFACE, highlightthickness=0, bd=0, **kw)
+        self._command = command
+        self._lo = 0.0
+        self._hi = 1.0
+        self._thumb_id = None
+        self._dragging = False
+        self._drag_start_y = 0
+        self._drag_start_lo = 0.0
+        self._hovered = False
+        self._fade_id: str | None = None
+        self._visible = False
+
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<ButtonRelease-1>", self._on_release)
+
+    def set(self, lo, hi):
+        """Chamado pelo Canvas para atualizar posição do thumb."""
+        self._lo = float(lo)
+        self._hi = float(hi)
+        self._draw_thumb()
+
+    def flash(self):
+        """Mostra o thumb temporariamente ao rolar com mouse."""
+        self._visible = True
+        self._draw_thumb()
+        if self._fade_id:
+            self.after_cancel(self._fade_id)
+        self._fade_id = self.after(1200, self._fade_out)
+
+    def _fade_out(self):
+        if not self._hovered and not self._dragging:
+            self._visible = False
+            self._draw_thumb()
+
+    def _on_enter(self, _e):
+        self._hovered = True
+        self._visible = True
+        if self._fade_id:
+            self.after_cancel(self._fade_id)
+        self._draw_thumb()
+
+    def _on_leave(self, _e):
+        self._hovered = False
+        if not self._dragging:
+            self._fade_id = self.after(800, self._fade_out)
+        self._draw_thumb()
+
+    def _on_press(self, event):
+        h = self.winfo_height()
+        thumb_y, thumb_h = self._thumb_coords(h)
+        if thumb_y <= event.y <= thumb_y + thumb_h:
+            self._dragging = True
+            self._drag_start_y = event.y
+            self._drag_start_lo = self._lo
+        else:
+            # Clique no track — pula para a posição
+            frac = event.y / h
+            self._command("moveto", str(frac))
+
+    def _on_drag(self, event):
+        if not self._dragging:
+            return
+        h = self.winfo_height()
+        dy = event.y - self._drag_start_y
+        span = self._hi - self._lo
+        delta = dy / h
+        new_lo = max(0.0, min(1.0 - span, self._drag_start_lo + delta))
+        self._command("moveto", str(new_lo))
+
+    def _on_release(self, _e):
+        self._dragging = False
+        if not self._hovered:
+            self._fade_id = self.after(800, self._fade_out)
+
+    def _thumb_coords(self, h):
+        span = self._hi - self._lo
+        if span >= 1.0:
+            return 0, 0
+        thumb_h = max(self.MIN_THUMB, h * span)
+        track = h - thumb_h
+        thumb_y = track * self._lo / (1.0 - span) if span < 1.0 else 0
+        return thumb_y, thumb_h
+
+    def _draw_thumb(self):
+        self.delete("thumb")
+        h = self.winfo_height()
+        w = self.winfo_width()
+        thumb_y, thumb_h = self._thumb_coords(h)
+
+        if thumb_h == 0 or (self._hi - self._lo) >= 1.0:
+            return
+
+        if not self._visible:
+            return
+
+        bar_w = self.THUMB_WIDTH_HOVER if self._hovered else self.THUMB_WIDTH
+        color = self.THUMB_HOVER if self._hovered or self._dragging else self.THUMB_COLOR
+        x1 = w - self.TRACK_PAD - bar_w
+        x2 = w - self.TRACK_PAD
+        r = bar_w // 2
+
+        # Thumb arredondado
+        self.create_oval(x1, thumb_y, x2, thumb_y + bar_w,
+                         fill=color, outline="", tags="thumb")
+        self.create_rectangle(x1, thumb_y + r, x2, thumb_y + thumb_h - r,
+                              fill=color, outline="", tags="thumb")
+        self.create_oval(x1, thumb_y + thumb_h - bar_w, x2, thumb_y + thumb_h,
+                         fill=color, outline="", tags="thumb")
+
+
 class FlatButton(tk.Canvas):
     """Botão flat com hover animado."""
 
@@ -400,10 +525,8 @@ class App(tk.Tk):
         list_container.columnconfigure(0, weight=1)
 
         canvas = tk.Canvas(list_container, bg=C.SURFACE, highlightthickness=0, bd=0)
-        scrollbar = tk.Scrollbar(list_container, orient=tk.VERTICAL,
-                                 command=canvas.yview, bg=C.SURFACE,
-                                 troughcolor=C.SURFACE, width=8,
-                                 relief=tk.FLAT, bd=0)
+
+        scrollbar = ModernScrollbar(list_container, command=canvas.yview)
 
         self._list_frame = tk.Frame(canvas, bg=C.SURFACE)
         self._list_frame.bind(
@@ -426,6 +549,7 @@ class App(tk.Tk):
 
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            scrollbar.flash()
 
         def _bind_scroll(_e):
             self.bind_all("<MouseWheel>", _on_mousewheel)
@@ -450,8 +574,16 @@ class App(tk.Tk):
         right = tk.Frame(body, bg=C.BG)
         right.grid(row=0, column=2, sticky="nsew")
 
-        tk.Label(right, text="Detalhes da Conexão", bg=C.BG, fg=C.TEXT,
-                 font=(FONT, 11, "bold")).pack(anchor="w", pady=(0, 16))
+        header_row = tk.Frame(right, bg=C.BG)
+        header_row.pack(fill=tk.X, pady=(0, 16))
+
+        tk.Label(header_row, text="Detalhes da Conexão", bg=C.BG, fg=C.TEXT,
+                 font=(FONT, 11, "bold")).pack(side=tk.LEFT)
+
+        new_btn = FlatButton(header_row, text="+  NOVA CONEXÃO", command=self._clear_form,
+                             bg=C.ACCENT, hover_bg=C.ACCENT_HOVER,
+                             width=150, height=32, font_size=9)
+        new_btn.pack(side=tk.RIGHT)
 
         # Campos do formulário
         fields = [
@@ -496,10 +628,6 @@ class App(tk.Tk):
                              width=130, height=36, font_size=10, bold=False)
         del_btn.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
-        new_btn = FlatButton(btn_area, text="+  NOVA CONEXÃO", command=self._clear_form,
-                             bg=C.BG, fg=C.TEXT_DIM, hover_bg=C.CARD,
-                             width=280, height=32, font_size=9, bold=False)
-        new_btn.pack(fill=tk.X, pady=(8, 0))
 
     # ── Ações ───────────────────────────────────────────
 
@@ -598,8 +726,26 @@ class App(tk.Tk):
             elif card_y + card_h > bottom:
                 self._scroll_canvas.yview_moveto((card_y + card_h - canvas_height) / total_h)
 
+    def _has_unsaved_input(self) -> bool:
+        """Verifica se há dados digitados no formulário."""
+        for key, entry in self.entries.items():
+            value = entry.get().strip()
+            if key == "porta" and value == "3389":
+                continue
+            if value:
+                return True
+        return False
+
     def _clear_form(self, _event=None):
+        if self._has_unsaved_input():
+            if not messagebox.askyesno(
+                "Nova Conexão",
+                "Os dados preenchidos serão perdidos.\nDeseja continuar?",
+                icon="warning"
+            ):
+                return
         self._selected_id = None
+        self.focus_set()
         for entry in self.entries.values():
             entry.clear()
         self.entries["porta"].set("3389")
