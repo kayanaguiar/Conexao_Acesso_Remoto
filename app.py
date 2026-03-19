@@ -737,7 +737,7 @@ class App(tk.Tk):
         return False
 
     def _clear_form(self, _event=None):
-        if self._has_unsaved_input():
+        if not self._selected_id and self._has_unsaved_input():
             if not messagebox.askyesno(
                 "Nova Conexão",
                 "Os dados preenchidos serão perdidos.\nDeseja continuar?",
