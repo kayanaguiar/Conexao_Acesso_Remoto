@@ -79,3 +79,6 @@ Obs: Em produção (.exe), esses ficam em `%APPDATA%/AcessarServidores/`
 - Scrollbar customizada (Canvas) estilo overlay — fina, arredondada, com fade automático
 - Botão "Nova Conexão" na linha do título "Detalhes da Conexão" (estilo accent)
 - Confirmação ao clicar "Nova Conexão" se houver dados não salvos no formulário (apenas para conexões novas, não para selecionadas)
+- Lixeira (🗑) em cada card de conexão para exclusão direta com confirmação permanente
+- Botões do formulário: "Conectar" (accent), "Salvar" + "Limpar" (secondary)
+- Git configurado com `core.autocrlf true` (line endings LF no repo, CRLF local)
