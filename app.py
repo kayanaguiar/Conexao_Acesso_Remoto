@@ -330,10 +330,11 @@ class FlatButton(tk.Canvas):
 class ConnectionCard(tk.Frame):
     """Card de conexão individual na lista."""
 
-    def __init__(self, parent, conn: dict, on_select, on_dblclick):
+    def __init__(self, parent, conn: dict, on_select, on_dblclick, on_delete):
         super().__init__(parent, bg=C.SURFACE, cursor="hand2")
         self.conn = conn
         self._selected = False
+        self._on_delete = on_delete
 
         self.configure(highlightthickness=1, highlightbackground=C.BORDER)
 
@@ -344,6 +345,14 @@ class ConnectionCard(tk.Frame):
         desc = conn.get("description") or conn["host"]
         tk.Label(top, text=desc, bg=C.SURFACE, fg=C.TEXT,
                  font=(FONT, 11, "bold"), anchor="w").pack(side=tk.LEFT)
+
+        # Botão lixeira
+        self._trash_btn = tk.Label(top, text="🗑", bg=C.SURFACE, fg=C.TEXT_MUTED,
+                                   font=(FONT, 11), cursor="hand2")
+        self._trash_btn.pack(side=tk.RIGHT, padx=(6, 0))
+        self._trash_btn.bind("<Button-1>", self._confirm_delete)
+        self._trash_btn.bind("<Enter>", lambda _: self._trash_btn.config(fg=C.DANGER))
+        self._trash_btn.bind("<Leave>", lambda _: self._trash_btn.config(fg=C.TEXT_MUTED))
 
         port_text = f":{conn['port']}" if conn["port"] != "3389" else ""
         tk.Label(top, text=port_text, bg=C.SURFACE, fg=C.TEXT_DIM,
@@ -364,12 +373,24 @@ class ConnectionCard(tk.Frame):
         self.bind("<Enter>", lambda _: self._hover(True))
         self.bind("<Leave>", lambda _: self._hover(False))
 
-        # Filhos propagam eventos para o card pai
+        # Filhos propagam eventos para o card pai (exceto a lixeira)
         for widget in self._all_children():
+            if widget is self._trash_btn:
+                continue
             widget.bind("<Button-1>", lambda _: on_select(self))
             widget.bind("<Double-1>", lambda _: on_dblclick(self))
             # Não bind Enter/Leave nos filhos — evita flicker
             widget.configure(cursor="hand2")
+
+    def _confirm_delete(self, _e=None):
+        desc = self.conn.get("description") or self.conn["host"]
+        if messagebox.askyesno(
+            "Excluir Conexão",
+            f"Deseja excluir \"{desc}\"?\n\nEssa ação é permanente e não pode ser desfeita.",
+            icon="warning"
+        ):
+            self._on_delete(self)
+        return "break"
 
     def _all_children(self):
         result = []
@@ -623,8 +644,8 @@ class App(tk.Tk):
                               width=130, height=36, font_size=10, bold=False)
         save_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
 
-        del_btn = FlatButton(btn_row, text="EXCLUIR", command=self._on_delete,
-                             bg=C.CARD, fg=C.DANGER, hover_bg="#2a1520",
+        del_btn = FlatButton(btn_row, text="LIMPAR", command=lambda: self._clear_form(confirm=False),
+                             bg=C.CARD, fg=C.TEXT, hover_bg=C.BORDER,
                              width=130, height=36, font_size=10, bold=False)
         del_btn.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
@@ -669,7 +690,8 @@ class App(tk.Tk):
         for conn in filtered:
             card = ConnectionCard(self._list_frame, conn,
                                   on_select=self._on_card_select,
-                                  on_dblclick=self._on_card_dblclick)
+                                  on_dblclick=self._on_card_dblclick,
+                                  on_delete=self._on_card_delete)
             card.pack(fill=tk.X, padx=4, pady=2)
             self._cards.append(card)
 
@@ -736,8 +758,8 @@ class App(tk.Tk):
                 return True
         return False
 
-    def _clear_form(self, _event=None):
-        if not self._selected_id and self._has_unsaved_input():
+    def _clear_form(self, _event=None, confirm=True):
+        if confirm and not self._selected_id and self._has_unsaved_input():
             if not messagebox.askyesno(
                 "Nova Conexão",
                 "Os dados preenchidos serão perdidos.\nDeseja continuar?",
@@ -779,6 +801,14 @@ class App(tk.Tk):
         self._on_card_select(card)
         self._on_connect()
 
+    def _on_card_delete(self, card: ConnectionCard):
+        storage.delete_connection(card.conn["id"])
+        if self._selected_card is card:
+            self._selected_card = None
+            self._selected_id = None
+        self._refresh_list()
+        self._clear_form(confirm=False)
+
     def _on_save(self, _event=None):
         values = {k: e.get().strip() for k, e in self.entries.items()}
         if not values["host_ip"] or not values["usuário"]:
@@ -800,7 +830,7 @@ class App(tk.Tk):
                 values["descrição"],
             )
         self._refresh_list()
-        self._clear_form()
+        self._clear_form(confirm=False)
 
     def _on_delete(self, _event=None):
         if not self._selected_id:
@@ -810,7 +840,7 @@ class App(tk.Tk):
             return
         storage.delete_connection(self._selected_id)
         self._refresh_list()
-        self._clear_form()
+        self._clear_form(confirm=False)
 
     def _on_connect(self, _event=None):
         values = {k: e.get().strip() for k, e in self.entries.items()}

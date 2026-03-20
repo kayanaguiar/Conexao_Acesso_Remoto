@@ -20,7 +20,7 @@ icon.ico         → Ícone do app (monitor com símbolo de conexão)
 ## Arquitetura
 
 - **Autenticação**: Senha mestre do usuário → PBKDF2HMAC (1.2M iterações) → chave Fernet. Sem senha correta, dados são inacessíveis
-- **GUI**: Tkinter puro com widgets customizados (`FlatEntry`, `FlatButton`, `ConnectionCard`)
+- **GUI**: Tkinter puro com widgets customizados (`FlatEntry`, `FlatButton`, `ConnectionCard`, `ModernScrollbar`)
 - **Armazenamento**: JSON simples em `%APPDATA%/AcessarServidores/connections.json`
 - **Criptografia**: Senhas criptografadas com Fernet/AES-256. Chave derivada da senha mestre via PBKDF2HMAC + salt
 - **RDP**: Usa `cmdkey` para salvar credencial temporária no Windows Credential Manager e `mstsc` com arquivo `.rdp` temporário
@@ -76,3 +76,6 @@ Obs: Em produção (.exe), esses ficam em `%APPDATA%/AcessarServidores/`
 - Janelas abrem centralizadas (withdraw → posicionar → deiconify)
 - Campos de senha com toggle "Exibir/Ocultar"
 - Focus automático no campo de senha ao abrir login
+- Scrollbar customizada (Canvas) estilo overlay — fina, arredondada, com fade automático
+- Botão "Nova Conexão" na linha do título "Detalhes da Conexão" (estilo accent)
+- Confirmação ao clicar "Nova Conexão" se houver dados não salvos no formulário (apenas para conexões novas, não para selecionadas)
