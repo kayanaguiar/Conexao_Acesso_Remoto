@@ -13,6 +13,7 @@ app.py           → Interface gráfica (Tkinter, tema escuro, widgets customiza
 storage.py       → CRUD de conexões em JSON (connections.json)
 crypto.py        → Criptografia de senhas (Fernet + PBKDF2HMAC, 1.2M iterações)
 rdp.py           → Lança conexão RDP via cmdkey + mstsc.exe
+installer.iss    → Script Inno Setup para gerar instalador Windows
 create_icon.py   → Script para gerar icon.ico
 icon.ico         → Ícone do app (monitor com símbolo de conexão)
 ```

@@ -1,29 +1,19 @@
 import subprocess
-import tempfile
-import os
 
 
 def connect(host: str, port: str, username: str, password: str):
-    """Abre uma conexão RDP usando cmdkey + mstsc."""
+    """Abre uma conexão RDP usando cmdkey + mstsc direto (sem arquivo .rdp).
+
+    Chamar mstsc com /v: em vez de passar um arquivo .rdp evita o aviso
+    "Cuidado: conexão remota desconhecida / Distribuidor: Fornecedor desconhecido",
+    que o Windows dispara para arquivos .rdp não assinados.
+    """
     server = f"{host}:{port}" if port and port != "3389" else host
 
-    # Salva credencial temporária no Windows Credential Manager
     subprocess.run(
         ["cmdkey", f"/generic:TERMSRV/{server}", f"/user:{username}", f"/pass:{password}"],
         creationflags=subprocess.CREATE_NO_WINDOW,
         check=True,
     )
 
-    # Cria arquivo .rdp temporário
-    rdp_content = (
-        f"full address:s:{server}\n"
-        f"username:s:{username}\n"
-        "prompt for credentials:i:0\n"
-        "authentication level:i:2\n"
-    )
-
-    rdp_path = os.path.join(tempfile.gettempdir(), "acessar_servidor.rdp")
-    with open(rdp_path, "w") as f:
-        f.write(rdp_content)
-
-    subprocess.Popen(["mstsc", rdp_path])
+    subprocess.Popen(["mstsc", f"/v:{server}"])
