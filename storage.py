@@ -73,3 +73,16 @@ def delete_connection(conn_id: str) -> bool:
         return False
     _save_raw(new_connections)
     return True
+
+
+def reorder(ids: list[str]) -> None:
+    """Regrava connections.json na ordem dada por ids.
+
+    Conexões cujos ids não estão na lista são preservadas no fim (segurança
+    contra IDs perdidos no caminho durante um drag-and-drop).
+    """
+    connections = _load_raw()
+    by_id = {c["id"]: c for c in connections}
+    ordered = [by_id[i] for i in ids if i in by_id]
+    leftover = [c for c in connections if c["id"] not in ids]
+    _save_raw(ordered + leftover)

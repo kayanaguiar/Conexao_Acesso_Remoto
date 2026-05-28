@@ -330,11 +330,20 @@ class FlatButton(tk.Canvas):
 class ConnectionCard(tk.Frame):
     """Card de conexão individual na lista."""
 
-    def __init__(self, parent, conn: dict, on_select, on_dblclick, on_delete):
+    DRAG_THRESHOLD = 5  # pixels antes de considerar movimento como drag
+
+    def __init__(self, parent, conn: dict, on_select, on_dblclick, on_delete,
+                 on_drag_start, on_drag_motion, on_drag_end):
         super().__init__(parent, bg=C.SURFACE, cursor="hand2")
         self.conn = conn
         self._selected = False
+        self._on_select = on_select
         self._on_delete = on_delete
+        self._on_drag_start = on_drag_start
+        self._on_drag_motion = on_drag_motion
+        self._on_drag_end = on_drag_end
+        self._press_y_root: int | None = None
+        self._dragging = False
 
         self.configure(highlightthickness=1, highlightbackground=C.BORDER)
 
@@ -367,8 +376,11 @@ class ConnectionCard(tk.Frame):
         tk.Label(bottom, text=conn["username"], bg=C.SURFACE,
                  fg=C.TEXT_MUTED, font=(FONT, 9), anchor="e").pack(side=tk.RIGHT)
 
-        # Bind no card inteiro — usa bind no frame pai para evitar flicker
-        self.bind("<Button-1>", lambda _: on_select(self))
+        # Bind no card inteiro: ButtonPress + Motion + Release implementam
+        # tanto select (click curto) quanto drag (movimento > threshold).
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_motion)
+        self.bind("<ButtonRelease-1>", self._on_release)
         self.bind("<Double-1>", lambda _: on_dblclick(self))
         self.bind("<Enter>", lambda _: self._hover(True))
         self.bind("<Leave>", lambda _: self._hover(False))
@@ -377,10 +389,33 @@ class ConnectionCard(tk.Frame):
         for widget in self._all_children():
             if widget is self._trash_btn:
                 continue
-            widget.bind("<Button-1>", lambda _: on_select(self))
+            widget.bind("<ButtonPress-1>", self._on_press)
+            widget.bind("<B1-Motion>", self._on_motion)
+            widget.bind("<ButtonRelease-1>", self._on_release)
             widget.bind("<Double-1>", lambda _: on_dblclick(self))
             # Não bind Enter/Leave nos filhos — evita flicker
             widget.configure(cursor="hand2")
+
+    def _on_press(self, event):
+        self._press_y_root = event.y_root
+        self._dragging = False
+
+    def _on_motion(self, event):
+        if self._press_y_root is None:
+            return
+        if not self._dragging and abs(event.y_root - self._press_y_root) > self.DRAG_THRESHOLD:
+            if self._on_drag_start(self):
+                self._dragging = True
+        if self._dragging:
+            self._on_drag_motion(self, event.y_root)
+
+    def _on_release(self, event):
+        if self._dragging:
+            self._on_drag_end(self, event.y_root)
+            self._dragging = False
+        elif self._press_y_root is not None:
+            self._on_select(self)
+        self._press_y_root = None
 
     def _confirm_delete(self, _e=None):
         desc = self.conn.get("description") or self.conn["host"]
@@ -453,6 +488,8 @@ class App(tk.Tk):
         self._cards: list[ConnectionCard] = []
         self._selected_card: ConnectionCard | None = None
         self._scroll_canvas: tk.Canvas | None = None
+        self._dragging_card: ConnectionCard | None = None
+        self._drop_indicator: tk.Frame | None = None
 
         self._build_ui()
         self._refresh_list()
@@ -591,6 +628,9 @@ class App(tk.Tk):
             justify=tk.CENTER, pady=40,
         )
 
+        # Indicador visual de onde o card vai cair durante o drag
+        self._drop_indicator = tk.Frame(self._list_frame, bg=C.ACCENT, height=2)
+
     def _build_right_panel(self, body):
         right = tk.Frame(body, bg=C.BG)
         right.grid(row=0, column=2, sticky="nsew")
@@ -691,7 +731,10 @@ class App(tk.Tk):
             card = ConnectionCard(self._list_frame, conn,
                                   on_select=self._on_card_select,
                                   on_dblclick=self._on_card_dblclick,
-                                  on_delete=self._on_card_delete)
+                                  on_delete=self._on_card_delete,
+                                  on_drag_start=self._on_card_drag_start,
+                                  on_drag_motion=self._on_card_drag_motion,
+                                  on_drag_end=self._on_card_drag_end)
             card.pack(fill=tk.X, padx=4, pady=2)
             self._cards.append(card)
 
@@ -808,6 +851,78 @@ class App(tk.Tk):
             self._selected_id = None
         self._refresh_list()
         self._clear_form(confirm=False)
+
+    # ── Drag-and-drop para reordenar ────────────────────────
+
+    def _on_card_drag_start(self, card: ConnectionCard) -> bool:
+        # Desabilita drag enquanto há busca ativa: a lista exibida pode ser
+        # um subconjunto da real, e reordenar parcialmente confunde o usuário.
+        if self._search_var.get():
+            return False
+        if len(self._cards) < 2:
+            return False
+        self._dragging_card = card
+        card.configure(cursor="fleur")
+        return True
+
+    def _on_card_drag_motion(self, card: ConnectionCard, y_root: int):
+        if self._dragging_card is None:
+            return
+        target = self._compute_drop_index(y_root)
+        self._show_drop_indicator(target)
+
+    def _on_card_drag_end(self, card: ConnectionCard, y_root: int):
+        if self._dragging_card is None:
+            return
+        target = self._compute_drop_index(y_root)
+        self._hide_drop_indicator()
+        card.configure(cursor="hand2")
+
+        current = self._cards.index(card)
+        # Sem movimento real (mesma posição ou imediatamente depois de si mesmo)
+        if target == current or target == current + 1:
+            self._dragging_card = None
+            return
+
+        insert_at = target if target < current else target - 1
+
+        # Re-empacota sem destruir os cards: preserva scroll, hover e seleção.
+        self._cards.pop(current)
+        self._cards.insert(insert_at, card)
+        for c in self._cards:
+            c.pack_forget()
+        # Indicador é filho do _list_frame; re-empacotar não o atinge,
+        # mas precisamos garantir que ele esteja escondido (place_forget feito acima)
+        for c in self._cards:
+            c.pack(fill=tk.X, padx=4, pady=2)
+
+        storage.reorder([c.conn["id"] for c in self._cards])
+        self._dragging_card = None
+
+    def _compute_drop_index(self, y_root: int) -> int:
+        """Índice (0..len) onde o card seria inserido para uma posição Y do mouse."""
+        for i, c in enumerate(self._cards):
+            mid_y = c.winfo_rooty() + c.winfo_height() // 2
+            if y_root < mid_y:
+                return i
+        return len(self._cards)
+
+    def _show_drop_indicator(self, index: int):
+        if not self._cards or self._drop_indicator is None:
+            return
+        if index <= 0:
+            y = self._cards[0].winfo_y() - 1
+        elif index >= len(self._cards):
+            last = self._cards[-1]
+            y = last.winfo_y() + last.winfo_height() + 1
+        else:
+            prev = self._cards[index - 1]
+            y = prev.winfo_y() + prev.winfo_height() + 1
+        self._drop_indicator.place(x=4, y=y, relwidth=1.0, width=-8, height=2)
+
+    def _hide_drop_indicator(self):
+        if self._drop_indicator is not None:
+            self._drop_indicator.place_forget()
 
     def _on_save(self, _event=None):
         values = {k: e.get().strip() for k, e in self.entries.items()}
